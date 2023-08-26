@@ -103,6 +103,22 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+type Group struct {
+	// GroupName contains a list of users
+	GroupName []string `json:"group_name"`
+}
+
+type PageAccess struct {
+	// Accepted values: group_name|authed|unrestricted
+	Page   string  `json:"page"` // use default if nothing else is found
+	Groups []Group `json:"groups"`
+}
+
+type User struct {
+	Username string `json:"username"`
+	UserID   int    `json:"user_id"`
+}
+
 func validateUserAccess(page string, user_id int, username string) bool {
 	if username == "Admin" {
 		return true
