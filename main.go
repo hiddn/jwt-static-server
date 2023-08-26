@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,12 +16,26 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+var Config Configuration
+
 var prefix = "/"
-var jwksURL = "http://127.0.0.1:6000/.well-known/jwks.json"
+var jwksURL = "http://127.0.0.1/.well-known/jwks.json"
+var jwtRefreshURL = "http://127.0.0.1:6000/api/v1/authn/refresh"
 var jwks *keyfunc.JWKS
+
+type jwtInfos struct {
+	Jwks          *keyfunc.JWKS
+	JwksURL       string
+	ApiRefreshURL string
+}
 
 func main() {
 	var err error
+
+	var configFile = "config.json"
+	Config = ReadConf(configFile)
+	//jwtRefreshURL = Config.csc_api_url + Config.csc_api_url // Marche pas en ce moment
+
 	jwks, err = InitJWKS(jwksURL)
 	if err != nil {
 		log.Fatalf("Could not obtain JWKS from %s", jwksURL)
@@ -53,7 +69,8 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 		//fmt.Println("access token: ", jwtTokens.AccessToken)
 		var isValid bool
 		var claims jwt.MapClaims
-		isValid, claims = validateToken(jwtTokens.AccessToken)
+		isValid, claims = validateJWTTokens(w, jwtTokens)
+		//isValid, claims = validateToken(jwtTokens.AccessToken)
 		if isValid {
 			var username string
 			var userIDf float64
@@ -87,7 +104,7 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateUserAccess(page string, user_id int, username string) bool {
-	if username == "Admin2" {
+	if username == "Admin" {
 		return true
 	}
 	return false
@@ -138,8 +155,65 @@ func validateToken(jwtToken string) (bool, jwt.MapClaims) {
 	if !ok {
 		return false, nil
 	}
-	fmt.Println("username =", claims["username"])
+	//fmt.Println("username =", claims["username"])
 	return true, claims
+}
+func validateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens) (isValid bool, claims jwt.MapClaims) {
+	//var isValid bool
+	//var claims jwt.MapClaims
+	isValid, claims = validateToken(jwtTokens.AccessToken)
+	if isValid {
+		//return isValid, claims
+	}
+	isValid, claims = validateToken(jwtTokens.RefreshToken)
+	if isValid {
+		// Refresh token still valid.
+		// We need to get a new access token with the refresh token.
+		newJwtTokens, err := refreshToken(w, jwtRefreshURL, jwtTokens.RefreshToken)
+		if err != nil {
+			isValid = false
+			return isValid, claims
+		}
+		isValid, claims = validateToken(newJwtTokens.AccessToken)
+	}
+	return isValid, claims
+}
+
+func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTokens, error) {
+	fmt.Println("refreshToken() called. url =", url)
+	var newJwtTokens JwtTokens
+	var rtReq refreshTokenRequest
+	rtReq.RefreshToken = refreshToken
+	//var data = []byte(fmt.Sprintf(`{"refresh_token": "%s"}`, refreshToken))
+	data, err := json.Marshal(rtReq)
+	if err != nil {
+		log.Fatalf("refreshToken(): abnormal error. This shouldn't have happened")
+		//return newJwtTokens, errors.New("refreshToken(): abnormal error. This shouldn't have happened")
+	}
+	fmt.Println(string(data))
+	response, err := http.Post(url, "application/json", bytes.NewBuffer([]byte(data)))
+	if err != nil {
+		fmt.Println("error in refreshToken: ", err)
+		return newJwtTokens, err
+	}
+	defer response.Body.Close()
+
+	fmt.Println("response.status =", response.Status)
+	if response.StatusCode != 200 {
+		return newJwtTokens, errors.New("refresh token refused: Unauthorized")
+	}
+	var res map[string]interface{}
+	json.NewDecoder(response.Body).Decode(&res)
+	//fmt.Println("res =", res)
+	at, _ := res["access_token"]
+	newJwtTokens.AccessToken = at.(string)
+	rt, _ := res["refresh_token"]
+	newJwtTokens.RefreshToken = rt.(string)
+	tokenAsJSON, _ := json.Marshal(newJwtTokens)
+	fmt.Println("debug: ", string(tokenAsJSON))
+	tokenAsJSONb64 := base64.StdEncoding.EncodeToString(tokenAsJSON)
+	setCookie(w, "jwt_token", tokenAsJSONb64)
+	return newJwtTokens, err
 }
 
 func getJwtTokensFromCookie(r *http.Request) (JwtTokens, error) {
@@ -226,4 +300,8 @@ func serveTemplate(w http.ResponseWriter, r *http.Request) {
 type JwtTokens struct {
 	AccessToken  string `json:"access_token" extensions:"x-order=0"`
 	RefreshToken string `json:"refresh_token,omitempty" extensions:"x-order=1"`
+}
+
+type refreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token" valid:"required"`
 }
