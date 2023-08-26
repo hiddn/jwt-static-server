@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v2"
@@ -22,6 +23,7 @@ var prefix = "/"
 var jwksURL = "http://127.0.0.1/.well-known/jwks.json"
 var jwtRefreshURL = "http://127.0.0.1:6000/api/v1/authn/refresh"
 var jwks *keyfunc.JWKS
+var Access AccessData
 
 type jwtInfos struct {
 	Jwks          *keyfunc.JWKS
@@ -34,7 +36,11 @@ func main() {
 
 	var configFile = "config.json"
 	Config = ReadConf(configFile)
+	getJSONfromFile(configFile, &Config)
 	//jwtRefreshURL = Config.csc_api_url + Config.csc_api_url // Marche pas en ce moment
+
+	fmt.Println("what: ", Config.groups_file)
+	Access.LoadUsersAndPages("pages.json", "groups.json", "users.json")
 
 	jwks, err = InitJWKS(jwksURL)
 	if err != nil {
@@ -86,12 +92,15 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 			}
 			userID = int(userIDf)
 			realHandler := http.StripPrefix(prefix, fs).ServeHTTP
-			can_access_page := validateUserAccess(r.URL.Path, userID, username)
+			//can_access_page := validateUserAccess(r.URL.Path, userID, username)
+			can_access_page := Access.validateUserAccess(r.URL.Path, userID, username)
 			if can_access_page {
 				realHandler(w, r)
 				return
 			} else {
-				loginErrStr = "Access denied"
+				loginErrStr := fmt.Sprintf("Access denied (%s)", username)
+				fmt.Fprintf(w, loginErrStr)
+				return
 			}
 		}
 	}
@@ -105,18 +114,160 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 
 type Group struct {
 	// GroupName contains a list of users
-	GroupName []string `json:"group_name"`
+	GroupName string   `json:"group_name"`
+	Users     []string `json:"users"`
 }
 
 type PageAccess struct {
 	// Accepted values: group_name|authed|unrestricted
-	Page   string  `json:"page"` // use default if nothing else is found
-	Groups []Group `json:"groups"`
+	Page   string   `json:"page"` // use default if nothing else is found
+	Groups []string `json:"groups"`
 }
 
 type User struct {
 	Username string `json:"username"`
 	UserID   int    `json:"user_id"`
+}
+
+type AccessData struct {
+	PageGroups map[string][]string
+	GroupUsers map[string][]string
+	UserID     map[string]int
+
+	UserPages     map[string]map[string]int
+	userGroups    map[string]int
+	DefaultPolicy string
+}
+
+func (a *AccessData) LoadUsersAndPages(pages_file, groups_file, users_file string) {
+	//getJSONfromFile(users_file, &a.Users)
+	getJSONfromFile(pages_file, &a.PageGroups)
+	getJSONfromFile(groups_file, &a.GroupUsers)
+	a.DefaultPolicy = a.getDefaultPolicy()
+	fmt.Println("Default policy:", a.DefaultPolicy)
+	a.buildAccessMapByUser()
+	//defPerm := a.PageGroups["default"]
+}
+
+func (a *AccessData) buildAccessMapByUser() {
+	a.UserPages = make(map[string]map[string]int)
+	for p, groups := range a.PageGroups {
+		for _, g := range groups {
+			groupusers, _ := a.GroupUsers[g]
+			for _, u := range groupusers {
+				if _, ok := a.UserPages[u]; !ok {
+					var t map[string]int
+					t = make(map[string]int)
+					t[p] = a.GetIDbyUsername(u)
+					a.UserPages[u] = t
+				} else {
+					a.UserPages[u][p] = a.GetIDbyUsername(u)
+					fmt.Printf("access: u:%s p:%s g:%s\n", u, p, g)
+				}
+			}
+		}
+	}
+	switch a.DefaultPolicy {
+	case "open":
+		return
+	case "authed":
+		return
+	case "deny":
+		return
+	default:
+		a.userGroups = make(map[string]int)
+		for _, u := range a.GroupUsers[a.DefaultPolicy] {
+			usergroup := fmt.Sprintf("%s.%s", a.DefaultPolicy, u)
+			a.userGroups[usergroup] = a.GetIDbyUsername(u)
+		}
+	}
+}
+
+func (a *AccessData) IsUserMemberOfGroup(username, group string) bool {
+	usergroup := fmt.Sprintf("%s.%s", group, username)
+	if _, ok := a.userGroups[usergroup]; ok {
+		return true
+	}
+	return false
+}
+func (a *AccessData) GetIDbyUsername(username string) int {
+	id, ok := a.UserID[username]
+	if !ok {
+		// UserID not found
+		return -1
+	}
+	return id
+}
+
+func (a *AccessData) validateUserAccess(page string, user_id int, username string) (ret bool) {
+	ret = false
+	printRet := func(ret *bool) {
+		fmt.Printf(" Granted: %v\n", *ret)
+	}
+	defer printRet(&ret)
+	fmt.Printf("Validating access. u:%s p:%s...", username, page)
+	if _, dontUseDefault := a.PageGroups[page]; !dontUseDefault {
+		//fmt.Printf("dontUseDefault=%v, a.DefaultPolicy=%s\na.IsUserMemberOfGroup(username, a.DefaultPolicy)=%v", dontUseDefault, a.DefaultPolicy, a.IsUserMemberOfGroup(username, a.DefaultPolicy))
+		switch a.DefaultPolicy {
+		case "open":
+		case "authed":
+			ret = true
+			return
+		case "deny":
+			ret = false
+			return
+		default:
+			ret = a.IsUserMemberOfGroup(username, a.DefaultPolicy)
+			return
+		}
+	}
+	//fmt.Printf("Validation for page/user access: u:%s p:%s\n", page, username)
+	pages, ok := a.UserPages[username]
+	if !ok {
+		ret = false
+		return
+	}
+	expectedUserID, ok := pages[page]
+	if !ok {
+		ret = false
+		return
+	}
+	if expectedUserID == user_id || expectedUserID == -1 {
+		ret = true
+		return
+	}
+	ret = false
+	return
+}
+
+func (a *AccessData) getDefaultPolicy() string {
+	defaultGroups, ok := a.PageGroups["default"]
+	if !ok {
+		log.Printf("Default permission missing.")
+		return "deny"
+	}
+	if len(defaultGroups) > 0 {
+		group := defaultGroups[0]
+		if _, ok := a.GroupUsers[group]; !ok {
+			if group != "deny" && group != "authed" && group != "open" {
+				return "deny"
+			}
+			log.Fatalf("AccessData: default page specifies group that does not exist. Accepted values: authed, deny, open, or <groupname>\n")
+			return group
+		}
+		return group
+	}
+	return "deny"
+}
+
+func getJSONfromFile(file string, ptr interface{}) {
+	content, err := os.ReadFile(file)
+	if err != nil {
+		log.Fatal("Error when opening file: ", err)
+	}
+	if err := json.Unmarshal(content, &ptr); err != nil {
+		log.Fatalf("getJSONfromFile() error with %s: %s", file, err)
+	}
 }
 
 func validateUserAccess(page string, user_id int, username string) bool {
@@ -155,7 +306,7 @@ func InitJWKS(jwksURL string) (*keyfunc.JWKS, error) {
 // Function to validate a base64 JWT Access token or Refresh token
 func validateToken(jwtToken string) (bool, jwt.MapClaims) {
 	// Parse the JWT.
-	fmt.Println("jwt token:", jwtToken)
+	//fmt.Println("jwt token:", jwtToken)
 	token, err := jwt.Parse(jwtToken, jwks.Keyfunc)
 	if err != nil {
 		log.Printf("Failed to parse the JWT.\nError: %s\n", err.Error())
@@ -166,7 +317,7 @@ func validateToken(jwtToken string) (bool, jwt.MapClaims) {
 	if !token.Valid {
 		return false, nil
 	}
-	fmt.Println("Claims: ", token.Claims)
+	//fmt.Println("Claims: ", token.Claims)
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return false, nil
@@ -179,7 +330,7 @@ func validateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens) (isValid bool
 	//var claims jwt.MapClaims
 	isValid, claims = validateToken(jwtTokens.AccessToken)
 	if isValid {
-		//return isValid, claims
+		return isValid, claims
 	}
 	isValid, claims = validateToken(jwtTokens.RefreshToken)
 	if isValid {
@@ -196,7 +347,7 @@ func validateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens) (isValid bool
 }
 
 func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTokens, error) {
-	fmt.Println("refreshToken() called. url =", url)
+	fmt.Println("refreshToken() called.")
 	var newJwtTokens JwtTokens
 	var rtReq refreshTokenRequest
 	rtReq.RefreshToken = refreshToken
@@ -206,7 +357,7 @@ func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTo
 		log.Fatalf("refreshToken(): abnormal error. This shouldn't have happened")
 		//return newJwtTokens, errors.New("refreshToken(): abnormal error. This shouldn't have happened")
 	}
-	fmt.Println(string(data))
+	//fmt.Println(string(data))
 	response, err := http.Post(url, "application/json", bytes.NewBuffer([]byte(data)))
 	if err != nil {
 		fmt.Println("error in refreshToken: ", err)
@@ -226,7 +377,7 @@ func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTo
 	rt, _ := res["refresh_token"]
 	newJwtTokens.RefreshToken = rt.(string)
 	tokenAsJSON, _ := json.Marshal(newJwtTokens)
-	fmt.Println("debug: ", string(tokenAsJSON))
+	//fmt.Println("debug: ", string(tokenAsJSON))
 	tokenAsJSONb64 := base64.StdEncoding.EncodeToString(tokenAsJSON)
 	setCookie(w, "jwt_token", tokenAsJSONb64)
 	return newJwtTokens, err
@@ -248,7 +399,7 @@ func getJwtTokensFromCookie(r *http.Request) (JwtTokens, error) {
 		fmt.Println("error loading json: ", err)
 		return jwtTokens, err
 	}
-	fmt.Println("token: ", string(jsonJwtByteArr))
+	//fmt.Println("token: ", string(jsonJwtByteArr))
 	return jwtTokens, err
 }
 
