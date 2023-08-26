@@ -1,0 +1,6 @@
+{
+    "default": ["opers"],
+    "/structure.html": ["admins"],
+    "/index.html": ["admins", "opers"],
+    "/": ["admins", "opers"]
+}
