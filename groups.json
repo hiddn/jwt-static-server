@@ -1,4 +1,4 @@
 {
-    "opers": ["Admin", "Hidden"],
+    "opers": ["Admin", "Hidden", "hi"],
     "admins": ["Hidden"]
 }

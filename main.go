@@ -98,8 +98,8 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 				realHandler(w, r)
 				return
 			} else {
-				loginErrStr := fmt.Sprintf("Access denied (%s)", username)
-				fmt.Fprintf(w, loginErrStr)
+				message := "Unauthorized: Access denied"
+				http.Error(w, message, http.StatusUnauthorized)
 				return
 			}
 		}
@@ -447,11 +447,17 @@ func getTokenInfosFromB64(jwtToken string) {
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie("jwt_token")
-	if err != nil {
-		return
+	var loginErrStr string
+	if err == nil {
+		c.Expires = time.Unix(1414414788, 1414414788000)
+		http.SetCookie(w, c)
+		loginErrStr = "You are now logged out"
+	} else {
+		loginErrStr = "You were already logged out"
 	}
-	c.Expires = time.Unix(1414414788, 1414414788000)
-	http.SetCookie(w, c)
+	loginErrStr = fmt.Sprintf("&message=%s", url.QueryEscape(loginErrStr))
+	login_path := fmt.Sprintf("/login?next=%s%s", "/", loginErrStr)
+	http.Redirect(w, r, login_path, http.StatusSeeOther)
 }
 
 /*
