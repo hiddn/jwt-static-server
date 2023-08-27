@@ -1,0 +1,12 @@
+{
+    "csc_api_url": "http://127.0.0.1:6000",
+    "csc_login_path": "/api/v1/authn",
+    "jwt_refresh_path": "/api/v1/authn/refresh",
+    "jwks_path": "/.well-known/jwks.json",
+    "static_content_path": "/",
+    "static_content_dir": "../mkdocs/",
+    "static_content_permissions": "oper",
+    "pages_file": "pages.json",
+    "groups_file": "groups.json",
+    "users_file": "users.json"
+}
