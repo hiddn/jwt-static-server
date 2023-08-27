@@ -1,6 +1,5 @@
 {
     "default": ["opers"],
-    "/structure.html": ["admins"],
-    "/index.html": ["admins", "opers"],
-    "/": ["admins", "opers"]
+    "/committees/abuse/teams/": ["admins"],
+    "/team/admin/network/": ["admins"]
 }
