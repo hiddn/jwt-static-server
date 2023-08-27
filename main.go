@@ -460,16 +460,6 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, login_path, http.StatusSeeOther)
 }
 
-/*
-func serveTemplate(w http.ResponseWriter, r *http.Request) {
-	lp := filepath.Join("templates", "layout.html")
-	fp := filepath.Join("templates", filepath.Clean(r.URL.Path))
-
-	tmpl, _ := template.ParseFiles(lp, fp)
-	tmpl.ExecuteTemplate(w, "layout", nil)
-}
-*/
-
 type JwtTokens struct {
 	AccessToken  string `json:"access_token" extensions:"x-order=0"`
 	RefreshToken string `json:"refresh_token,omitempty" extensions:"x-order=1"`
