@@ -65,8 +65,13 @@ func Init() {
 }
 
 func serveStatic(w http.ResponseWriter, r *http.Request) {
+	var fs http.Handler
+	servePage := func() {
+		realHandler := http.StripPrefix(Config.Static_content_urlpath, fs).ServeHTTP
+		realHandler(w, r)
+	}
 	var loginErrStr string = ""
-	fs := http.FileServer(http.Dir(Config.Static_content_dir))
+	fs = http.FileServer(http.Dir(Config.Static_content_dir))
 	jwtTokens, err := getJwtTokensFromCookie(r)
 	if err != nil {
 		fmt.Println("error with getJwtTokenFromCookie(): ", err)
@@ -75,6 +80,11 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 		var isValid bool
 		var claims jwt.MapClaims
 		isValid, claims = validateJWTTokens(w, jwtTokens)
+		if Access.DefaultPolicy == "open" {
+			fmt.Printf("(policy: open): serving %s without authentification\n", r.URL.Path)
+			servePage()
+			return
+		}
 		if isValid {
 			var username string
 			var userIDf float64
@@ -89,10 +99,9 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 				log.Fatalln("Misconstructed jwt token. Missing user_id in claims:", claims)
 			}
 			userID = int(userIDf)
-			realHandler := http.StripPrefix(Config.Static_content_urlpath, fs).ServeHTTP
 			can_access_page := Access.canUserAccessPage(r.URL.Path, userID, username)
 			if can_access_page {
-				realHandler(w, r)
+				servePage()
 				return
 			} else {
 				message := "Unauthorized: Access denied"
