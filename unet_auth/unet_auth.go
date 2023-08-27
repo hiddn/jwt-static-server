@@ -18,6 +18,8 @@ import (
 	"github.com/hiddn/unet_auth/confighandler"
 )
 
+var DEBUG = true
+
 var Config confighandler.Configuration
 var JwtInfos jwtInfos
 var Access AccessData
@@ -69,7 +71,7 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println("error with getJwtTokenFromCookie(): ", err)
 	} else {
-		//fmt.Println("access token: ", jwtTokens.AccessToken)
+		//Debugln("access token: ", jwtTokens.AccessToken)
 		var isValid bool
 		var claims jwt.MapClaims
 		isValid, claims = validateJWTTokens(w, jwtTokens)
@@ -158,7 +160,7 @@ func (a *AccessData) buildAccessMapByUser() {
 					a.UserPages[u] = t
 				} else {
 					a.UserPages[u][p] = a.GetIDbyUsername(u)
-					fmt.Printf("access: u:%s p:%s g:%s\n", u, p, g)
+					Debugf("access: u:%s p:%s g:%s\n", u, p, g)
 				}
 			}
 		}
@@ -198,23 +200,25 @@ func (a *AccessData) GetIDbyUsername(username string) int {
 func (a *AccessData) canUserAccessPage(page string, user_id int, username string) (ret bool) {
 	ret = false
 	printRet := func(ret *bool) {
-		fmt.Printf(" Granted: %v\n", *ret)
+		if DEBUG == true {
+			fmt.Printf(" Granted: %v\n", *ret)
+		}
 	}
 	defer printRet(&ret)
-	fmt.Printf("Validating access. u:%s p:%s...", username, page)
+	Debugf("Validating access. u:%s p:%s...", username, page)
 	/*
 		// that code could eventually be used if I added the possibility
 		// to give permissions for all files (and sub-directories) in a directory.
 		for {
 			parts := strings.Split(page, "/")
 			tPage := strings.Join(parts[:len(parts)-1], "/")
-			fmt.Printf("Testing %s\n", tPage)
+			Debugf("Testing %s\n", tPage)
 			break
 		}
 	*/
 	if _, dontUseDefault := a.PageGroups[page]; !dontUseDefault {
 		// Page is not listed in pages.json
-		//fmt.Printf("dontUseDefault=%v, a.DefaultPolicy=%s\na.IsUserMemberOfGroup(username, a.DefaultPolicy)=%v", dontUseDefault, a.DefaultPolicy, a.IsUserMemberOfGroup(username, a.DefaultPolicy))
+		//Debugf("dontUseDefault=%v, a.DefaultPolicy=%s\na.IsUserMemberOfGroup(username, a.DefaultPolicy)=%v", dontUseDefault, a.DefaultPolicy, a.IsUserMemberOfGroup(username, a.DefaultPolicy))
 		switch a.DefaultPolicy {
 		case "open":
 			ret = true
@@ -230,7 +234,7 @@ func (a *AccessData) canUserAccessPage(page string, user_id int, username string
 			return
 		}
 	}
-	//fmt.Printf("Validation for page/user access: u:%s p:%s\n", page, username)
+	//Debugf("Validation for page/user access: u:%s p:%s\n", page, username)
 	pages, ok := a.UserPages[username]
 	if !ok {
 		ret = false
@@ -322,7 +326,7 @@ func InitJWKS(jwksURL string) (*keyfunc.JWKS, error) {
 // Function to validate a base64 JWT Access token or Refresh token
 func validateToken(jwtToken string) (bool, jwt.MapClaims) {
 	// Parse the JWT.
-	//fmt.Println("jwt token:", jwtToken)
+	//Debugln("jwt token:", jwtToken)
 	token, err := jwt.Parse(jwtToken, JwtInfos.Jwks.Keyfunc)
 	if err != nil {
 		log.Printf("Failed to parse the JWT.\nError: %s\n", err.Error())
@@ -333,12 +337,12 @@ func validateToken(jwtToken string) (bool, jwt.MapClaims) {
 	if !token.Valid {
 		return false, nil
 	}
-	//fmt.Println("Claims: ", token.Claims)
+	//Debugln("Claims: ", token.Claims)
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return false, nil
 	}
-	//fmt.Println("username =", claims["username"])
+	//Debugln("username =", claims["username"])
 	return true, claims
 }
 func validateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens) (isValid bool, claims jwt.MapClaims) {
@@ -364,7 +368,7 @@ func validateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens) (isValid bool
 }
 
 func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTokens, error) {
-	fmt.Println("refreshToken() called.")
+	Debugln("refreshToken() called.")
 	var newJwtTokens JwtTokens
 	var rtReq refreshTokenRequest
 	rtReq.RefreshToken = refreshToken
@@ -374,7 +378,7 @@ func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTo
 		log.Fatalf("refreshToken(): abnormal error. This shouldn't have happened")
 		//return newJwtTokens, errors.New("refreshToken(): abnormal error. This shouldn't have happened")
 	}
-	//fmt.Println(string(data))
+	//Debugln(string(data))
 	response, err := http.Post(url, "application/json", bytes.NewBuffer([]byte(data)))
 	if err != nil {
 		fmt.Println("error in refreshToken: ", err)
@@ -382,19 +386,19 @@ func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTo
 	}
 	defer response.Body.Close()
 
-	fmt.Println("response.status =", response.Status)
+	Debugln("response.status =", response.Status)
 	if response.StatusCode != 200 {
 		return newJwtTokens, errors.New("refresh token refused: Unauthorized")
 	}
 	var res map[string]interface{}
 	json.NewDecoder(response.Body).Decode(&res)
-	//fmt.Println("res =", res)
+	//Debugln("res =", res)
 	at, _ := res["access_token"]
 	newJwtTokens.AccessToken = at.(string)
 	rt, _ := res["refresh_token"]
 	newJwtTokens.RefreshToken = rt.(string)
 	tokenAsJSON, _ := json.Marshal(newJwtTokens)
-	//fmt.Println("debug: ", string(tokenAsJSON))
+	//Debugln("debug: ", string(tokenAsJSON))
 	tokenAsJSONb64 := base64.StdEncoding.EncodeToString(tokenAsJSON)
 	setCookie(w, "jwt_token", tokenAsJSONb64)
 	return newJwtTokens, err
@@ -416,7 +420,7 @@ func getJwtTokensFromCookie(r *http.Request) (JwtTokens, error) {
 		fmt.Println("error loading json: ", err)
 		return jwtTokens, err
 	}
-	//fmt.Println("token: ", string(jsonJwtByteArr))
+	//Debugln("token: ", string(jsonJwtByteArr))
 	return jwtTokens, err
 }
 
@@ -441,8 +445,8 @@ func handleSetJwtCookie(w http.ResponseWriter, r *http.Request) {
 	cookieValue := r.PostFormValue(cookieName)
 	cookieValue = r.Form.Get(cookieName)
 	setCookie(w, cookieName, cookieValue)
-	fmt.Println(r.Body)
-	fmt.Printf("Setcookie: jwt_token = %s\n", cookieValue)
+	Debugln(r.Body)
+	Debugf("Setcookie: jwt_token = %s\n", cookieValue)
 }
 */
 
@@ -484,4 +488,24 @@ type JwtTokens struct {
 
 type refreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" valid:"required"`
+}
+
+// Debugf is a wrapper function for fmt.Printf that adds the "Debug: " prefix
+func Debugf(format string, a ...any) (n int, err error) {
+	if DEBUG != true {
+		return
+	}
+	format = "Debug: " + format
+	return fmt.Printf(format, a...)
+}
+
+// Debugln is a wrapper function for fmt.Println that adds the "Debug: " prefix
+func Debugln(a ...interface{}) (n int, err error) {
+	if DEBUG != true {
+		return
+	}
+	if len(a) > 0 {
+		a[0] = "Debug: " + fmt.Sprint(a[0])
+	}
+	return fmt.Println(a...)
 }
