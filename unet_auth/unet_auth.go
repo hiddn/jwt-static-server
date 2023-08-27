@@ -35,7 +35,6 @@ func Init() {
 	Config = confighandler.ReadConf(configFile)
 	getJSONfromFile(configFile, &Config)
 
-	fmt.Println("what: ", Config.Groups_file)
 	//Access.LoadUsersAndPages("pages.json", "groups.json", "users.json")
 	Access.LoadUsersAndPages(Config.Pages_file, Config.Groups_file, Config.Users_file)
 
@@ -65,8 +64,7 @@ func Init() {
 
 func serveStatic(w http.ResponseWriter, r *http.Request) {
 	var loginErrStr string = ""
-	dir := Config.Static_content_dir
-	fs := http.FileServer(http.Dir(dir))
+	fs := http.FileServer(http.Dir(Config.Static_content_dir))
 	jwtTokens, err := getJwtTokensFromCookie(r)
 	if err != nil {
 		fmt.Println("error with getJwtTokenFromCookie(): ", err)
@@ -75,7 +73,6 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 		var isValid bool
 		var claims jwt.MapClaims
 		isValid, claims = validateJWTTokens(w, jwtTokens)
-		//isValid, claims = validateToken(jwtTokens.AccessToken)
 		if isValid {
 			var username string
 			var userIDf float64
@@ -91,7 +88,7 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 			}
 			userID = int(userIDf)
 			realHandler := http.StripPrefix(Config.Static_content_urlpath, fs).ServeHTTP
-			can_access_page := Access.validateUserAccess(r.URL.Path, userID, username)
+			can_access_page := Access.canUserAccessPage(r.URL.Path, userID, username)
 			if can_access_page {
 				realHandler(w, r)
 				return
@@ -132,7 +129,8 @@ type AccessData struct {
 	GroupUsers map[string][]string
 	UserID     map[string]int
 
-	UserPages     map[string]map[string]int
+	UserPages map[string]map[string]int
+	// key: 'group.user' value: UserID
 	userGroups    map[string]int
 	DefaultPolicy string
 }
@@ -183,8 +181,8 @@ func (a *AccessData) buildAccessMapByUser() {
 
 func (a *AccessData) IsUserMemberOfGroup(username, group string) bool {
 	usergroup := fmt.Sprintf("%s.%s", group, username)
-	if _, ok := a.userGroups[usergroup]; ok {
-		return true
+	if expectedUserID, ok := a.userGroups[usergroup]; ok {
+		return a.validateUserID(username, expectedUserID)
 	}
 	return false
 }
@@ -197,17 +195,30 @@ func (a *AccessData) GetIDbyUsername(username string) int {
 	return id
 }
 
-func (a *AccessData) validateUserAccess(page string, user_id int, username string) (ret bool) {
+func (a *AccessData) canUserAccessPage(page string, user_id int, username string) (ret bool) {
 	ret = false
 	printRet := func(ret *bool) {
 		fmt.Printf(" Granted: %v\n", *ret)
 	}
 	defer printRet(&ret)
 	fmt.Printf("Validating access. u:%s p:%s...", username, page)
+	/*
+		// that code could eventually be used if I added the possibility
+		// to give permissions for all files (and sub-directories) in a directory.
+		for {
+			parts := strings.Split(page, "/")
+			tPage := strings.Join(parts[:len(parts)-1], "/")
+			fmt.Printf("Testing %s\n", tPage)
+			break
+		}
+	*/
 	if _, dontUseDefault := a.PageGroups[page]; !dontUseDefault {
+		// Page is not listed in pages.json
 		//fmt.Printf("dontUseDefault=%v, a.DefaultPolicy=%s\na.IsUserMemberOfGroup(username, a.DefaultPolicy)=%v", dontUseDefault, a.DefaultPolicy, a.IsUserMemberOfGroup(username, a.DefaultPolicy))
 		switch a.DefaultPolicy {
 		case "open":
+			ret = true
+			return
 		case "authed":
 			ret = true
 			return
@@ -226,16 +237,23 @@ func (a *AccessData) validateUserAccess(page string, user_id int, username strin
 		return
 	}
 	expectedUserID, ok := pages[page]
+	ret = a.validateUserID(username, expectedUserID)
+	return
+}
+
+func (a *AccessData) validateUserID(username string, user_id int) bool {
+	expectedUserID, ok := a.UserID[username]
 	if !ok {
-		ret = false
-		return
+		if !Config.Force_UserID_validation {
+			return true
+		}
+		return false
 	}
 	if expectedUserID == user_id || expectedUserID == -1 {
-		ret = true
-		return
+		return true
 	}
-	ret = false
-	return
+	return false
+
 }
 
 func (a *AccessData) getDefaultPolicy() string {

@@ -14,4 +14,5 @@ type Configuration struct {
 	Pages_file                 string
 	Groups_file                string
 	Users_file                 string
+	Force_UserID_validation    bool
 }
