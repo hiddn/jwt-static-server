@@ -95,8 +95,8 @@ func (a *AccessData) buildAccessMapByUser() {
 					a.UserPages[u] = t
 				} else {
 					a.UserPages[u][p] = a.GetIDbyUsername(u)
-					debug.F("access: u:%s p:%s g:%s\n", u, p, g)
 				}
+				debug.F("access: u:%s p:%s g:%s\n", u, p, g)
 			}
 		}
 	}
