@@ -1,4 +1,4 @@
-package unet_auth
+package auth
 
 import (
 	"encoding/json"

@@ -1,4 +1,4 @@
-package unet_auth
+package auth
 
 import (
 	"fmt"
@@ -37,13 +37,15 @@ type AccessData struct {
 
 // Add a static site to serve
 func Init(configFile string) {
-	debug.Enable()
 	var err error
 
 	var s Site
 	sites = append(sites, &s)
 	s.Access.S = &s
 	s.Config = confighandler.ReadConf(configFile)
+	if s.Config.Enable_debug == true {
+		debug.Enable()
+	}
 	getJSONfromFile(configFile, &s.Config)
 
 	s.Access.LoadUsersAndPages(s.Config.Pages_file, s.Config.Groups_file, s.Config.Users_file)

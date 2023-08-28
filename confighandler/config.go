@@ -1,6 +1,7 @@
 package confighandler
 
 type Configuration struct {
+	Enable_debug              bool
 	Static_content_urlpath    string
 	Static_content_dir        string
 	Default_permission        string

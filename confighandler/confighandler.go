@@ -2,7 +2,6 @@ package confighandler
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 )
@@ -19,6 +18,6 @@ func ReadConf(filename string) Configuration {
 	if err != nil {
 		log.Fatal("config parse error:", err.Error())
 	}
-	fmt.Println("config:", configuration)
+	//fmt.Println("config:", configuration)
 	return configuration
 }

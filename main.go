@@ -1,7 +1,7 @@
 package main
 
-import "github.com/hiddn/jwt-static-server/unet_auth"
+import "github.com/hiddn/jwt-static-server/auth"
 
 func main() {
-	unet_auth.Init("config.json")
+	auth.Init("config.json")
 }

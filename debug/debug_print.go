@@ -6,6 +6,7 @@ var DEBUG = false
 
 func Enable() {
 	DEBUG = true
+	LN("Debug enabled")
 }
 func Disable() {
 	DEBUG = false
