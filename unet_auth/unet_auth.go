@@ -1,11 +1,7 @@
 package unet_auth
 
 import (
-	"bytes"
-	"context"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,46 +9,60 @@ import (
 	"os"
 	"time"
 
-	"github.com/MicahParks/keyfunc/v2"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/hiddn/unet_auth/confighandler"
+	"github.com/hiddn/jwt-static-server/confighandler"
+	"github.com/hiddn/jwt-static-server/debug"
+	"github.com/hiddn/jwt-static-server/jwtauth"
 )
 
-var DEBUG = true
+var sites []Site
 
-var Config confighandler.Configuration
-var JwtInfos jwtInfos
-var Access AccessData
+//var Config confighandler.Configuration
 
-type jwtInfos struct {
-	Jwks          *keyfunc.JWKS
-	JwksURL       string
-	ApiRefreshURL string
+type Site struct {
+	Config confighandler.Configuration
+	Access AccessData
+	Jwt    jwtauth.JwtInfos
 }
 
-func Init() {
+type AccessData struct {
+	S          *Site
+	PageGroups map[string][]string
+	GroupUsers map[string][]string
+	UserID     map[string]int
+
+	UserPages map[string]map[string]int
+	// key: 'group.user' value: UserID
+	userGroups    map[string]int
+	DefaultPolicy string
+}
+
+func Init(configFile string) {
+	debug.Enable()
 	var err error
 
-	var configFile = "config.json"
-	Config = confighandler.ReadConf(configFile)
-	getJSONfromFile(configFile, &Config)
+	var s Site
+	s.Access.S = &s
+	s.Config = confighandler.ReadConf(configFile)
+	getJSONfromFile(configFile, &s.Config)
 
 	//Access.LoadUsersAndPages("pages.json", "groups.json", "users.json")
-	Access.LoadUsersAndPages(Config.Pages_file, Config.Groups_file, Config.Users_file)
+	s.Access.LoadUsersAndPages(s.Config.Pages_file, s.Config.Groups_file, s.Config.Users_file)
 
-	jwksURL := Config.Csc_api_url + Config.Csc_api_jwks_path
-	JwtInfos.Jwks, err = InitJWKS(jwksURL)
+	jwksURL := s.Config.Csc_api_url + s.Config.Csc_api_jwks_path
+	jwksRefreshURL := s.Config.Csc_api_url + s.Config.Csc_api_refresh_path
+	s.Jwt, err = jwtauth.InitJWKS(jwksURL, jwksRefreshURL)
 	if err != nil {
 		log.Fatalf("Could not obtain JWKS from %s", jwksURL)
 	}
 
 	//vue page - if served locally
-	if Config.Login_content_serve_local {
-		fs := http.FileServer(http.Dir(Config.Login_content_dir))
-		http.Handle(Config.Login_url, http.StripPrefix(Config.Login_url, fs))
+	if s.Config.Login_content_serve_local {
+		fs := http.FileServer(http.Dir(s.Config.Login_content_dir))
+		http.Handle(s.Config.Login_url, http.StripPrefix(s.Config.Login_url, fs))
 	}
 
-	http.HandleFunc(Config.Static_content_urlpath, serveStatic)
+	http.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
 	http.HandleFunc("/logout", handleLogout)
 	//http.HandleFunc("/setcookie", handleSetJwtCookie)
 
@@ -61,26 +71,27 @@ func Init() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	JwtInfos.Jwks.EndBackground()
+	s.Jwt.Jwks.EndBackground()
 }
 
-func serveStatic(w http.ResponseWriter, r *http.Request) {
+func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
 	var fs http.Handler
 	servePage := func() {
-		realHandler := http.StripPrefix(Config.Static_content_urlpath, fs).ServeHTTP
+		realHandler := http.StripPrefix(s.Config.Static_content_urlpath, fs).ServeHTTP
 		realHandler(w, r)
 	}
 	var loginErrStr string = ""
-	fs = http.FileServer(http.Dir(Config.Static_content_dir))
-	jwtTokens, err := getJwtTokensFromCookie(r)
+	fs = http.FileServer(http.Dir(s.Config.Static_content_dir))
+	jwtTokens, err := jwtauth.GetJwtTokensFromCookie(r)
 	if err != nil {
 		fmt.Println("error with getJwtTokenFromCookie(): ", err)
 	} else {
-		//Debugln("access token: ", jwtTokens.AccessToken)
+		//debug.LN("access token: ", jwtTokens.AccessToken)
 		var isValid bool
 		var claims jwt.MapClaims
-		isValid, claims = validateJWTTokens(w, jwtTokens)
-		if Access.DefaultPolicy == "open" {
+		refresURL := fmt.Sprintf("%s%s", s.Config.Csc_api_url, s.Config.Csc_api_refresh_path)
+		isValid, claims = s.Jwt.ValidateJWTTokens(w, jwtTokens, refresURL)
+		if s.Access.DefaultPolicy == "open" {
 			fmt.Printf("(policy: open): serving %s without authentification\n", r.URL.Path)
 			servePage()
 			return
@@ -99,7 +110,7 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 				log.Fatalln("Misconstructed jwt token. Missing user_id in claims:", claims)
 			}
 			userID = int(userIDf)
-			can_access_page := Access.canUserAccessPage(r.URL.Path, userID, username)
+			can_access_page := s.Access.canUserAccessPage(r.URL.Path, userID, username)
 			if can_access_page {
 				servePage()
 				return
@@ -135,17 +146,6 @@ type User struct {
 	UserID   int    `json:"user_id"`
 }
 
-type AccessData struct {
-	PageGroups map[string][]string
-	GroupUsers map[string][]string
-	UserID     map[string]int
-
-	UserPages map[string]map[string]int
-	// key: 'group.user' value: UserID
-	userGroups    map[string]int
-	DefaultPolicy string
-}
-
 func (a *AccessData) LoadUsersAndPages(pages_file, groups_file, users_file string) {
 	//getJSONfromFile(users_file, &a.Users)
 	getJSONfromFile(pages_file, &a.PageGroups)
@@ -169,7 +169,7 @@ func (a *AccessData) buildAccessMapByUser() {
 					a.UserPages[u] = t
 				} else {
 					a.UserPages[u][p] = a.GetIDbyUsername(u)
-					Debugf("access: u:%s p:%s g:%s\n", u, p, g)
+					debug.F("access: u:%s p:%s g:%s\n", u, p, g)
 				}
 			}
 		}
@@ -209,25 +209,25 @@ func (a *AccessData) GetIDbyUsername(username string) int {
 func (a *AccessData) canUserAccessPage(page string, user_id int, username string) (ret bool) {
 	ret = false
 	printRet := func(ret *bool) {
-		if DEBUG == true {
+		if debug.IsEnabled() {
 			fmt.Printf(" Granted: %v\n", *ret)
 		}
 	}
 	defer printRet(&ret)
-	Debugf("Validating access. u:%s p:%s...", username, page)
+	debug.F("Validating access. u:%s p:%s...", username, page)
 	/*
 		// that code could eventually be used if I added the possibility
 		// to give permissions for all files (and sub-directories) in a directory.
 		for {
 			parts := strings.Split(page, "/")
 			tPage := strings.Join(parts[:len(parts)-1], "/")
-			Debugf("Testing %s\n", tPage)
+			debug.F("Testing %s\n", tPage)
 			break
 		}
 	*/
 	if _, dontUseDefault := a.PageGroups[page]; !dontUseDefault {
 		// Page is not listed in pages.json
-		//Debugf("dontUseDefault=%v, a.DefaultPolicy=%s\na.IsUserMemberOfGroup(username, a.DefaultPolicy)=%v", dontUseDefault, a.DefaultPolicy, a.IsUserMemberOfGroup(username, a.DefaultPolicy))
+		//debug.F("dontUseDefault=%v, a.DefaultPolicy=%s\na.IsUserMemberOfGroup(username, a.DefaultPolicy)=%v", dontUseDefault, a.DefaultPolicy, a.IsUserMemberOfGroup(username, a.DefaultPolicy))
 		switch a.DefaultPolicy {
 		case "open":
 			ret = true
@@ -243,7 +243,7 @@ func (a *AccessData) canUserAccessPage(page string, user_id int, username string
 			return
 		}
 	}
-	//Debugf("Validation for page/user access: u:%s p:%s\n", page, username)
+	//debug.F("Validation for page/user access: u:%s p:%s\n", page, username)
 	pages, ok := a.UserPages[username]
 	if !ok {
 		ret = false
@@ -257,7 +257,7 @@ func (a *AccessData) canUserAccessPage(page string, user_id int, username string
 func (a *AccessData) validateUserID(username string, user_id int) bool {
 	expectedUserID, ok := a.UserID[username]
 	if !ok {
-		if !Config.Force_UserID_validation {
+		if !a.S.Config.Force_UserID_validation {
 			return true
 		}
 		return false
@@ -305,176 +305,6 @@ func validateUserAccess(page string, user_id int, username string) bool {
 	}
 	return false
 }
-
-func InitJWKS(jwksURL string) (*keyfunc.JWKS, error) {
-	// Create a context that, when cancelled, ends the JWKS background refresh goroutine.
-	ctx, _ := context.WithCancel(context.Background())
-
-	// Create the keyfunc options. Use an error handler that logs. Refresh the JWKS when a JWT signed by an unknown KID
-	// is found or at the specified interval. Rate limit these refreshes. Timeout the initial JWKS refresh request after
-	// 10 seconds. This timeout is also used to create the initial context.Context for keyfunc.Get.
-	options := keyfunc.Options{
-		Ctx: ctx,
-		RefreshErrorHandler: func(err error) {
-			log.Printf("There was an error with the jwt.Keyfunc\nError: %s", err.Error())
-		},
-		RefreshInterval:   time.Hour,
-		RefreshRateLimit:  time.Minute * 5,
-		RefreshTimeout:    time.Second * 10,
-		RefreshUnknownKID: true,
-	}
-
-	// Create the JWKS from the resource at the given URL.
-	jwks, err := keyfunc.Get(jwksURL, options)
-	if err != nil {
-		log.Fatalf("Failed to create JWKS from resource at the given URL.\nError: %s", err.Error())
-	}
-	return jwks, err
-}
-
-// Function to validate a base64 JWT Access token or Refresh token
-func validateToken(jwtToken string) (bool, jwt.MapClaims) {
-	// Parse the JWT.
-	//Debugln("jwt token:", jwtToken)
-	token, err := jwt.Parse(jwtToken, JwtInfos.Jwks.Keyfunc)
-	if err != nil {
-		log.Printf("Failed to parse the JWT.\nError: %s\n", err.Error())
-		return false, nil
-	}
-
-	// Check if the token is valid.
-	if !token.Valid {
-		return false, nil
-	}
-	//Debugln("Claims: ", token.Claims)
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return false, nil
-	}
-	//Debugln("username =", claims["username"])
-	return true, claims
-}
-func validateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens) (isValid bool, claims jwt.MapClaims) {
-	//var isValid bool
-	//var claims jwt.MapClaims
-	isValid, claims = validateToken(jwtTokens.AccessToken)
-	if isValid {
-		return isValid, claims
-	}
-	isValid, claims = validateToken(jwtTokens.RefreshToken)
-	if isValid {
-		// Refresh token still valid.
-		// We need to get a new access token with the refresh token.
-		jwtRefreshURL := Config.Csc_api_url + Config.Csc_api_refresh_path
-		newJwtTokens, err := refreshToken(w, jwtRefreshURL, jwtTokens.RefreshToken)
-		if err != nil {
-			isValid = false
-			return isValid, claims
-		}
-		isValid, claims = validateToken(newJwtTokens.AccessToken)
-	}
-	return isValid, claims
-}
-
-func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTokens, error) {
-	Debugln("refreshToken() called.")
-	var newJwtTokens JwtTokens
-	var rtReq refreshTokenRequest
-	rtReq.RefreshToken = refreshToken
-	//var data = []byte(fmt.Sprintf(`{"refresh_token": "%s"}`, refreshToken))
-	data, err := json.Marshal(rtReq)
-	if err != nil {
-		log.Fatalf("refreshToken(): abnormal error. This shouldn't have happened")
-		//return newJwtTokens, errors.New("refreshToken(): abnormal error. This shouldn't have happened")
-	}
-	//Debugln(string(data))
-	response, err := http.Post(url, "application/json", bytes.NewBuffer([]byte(data)))
-	if err != nil {
-		fmt.Println("error in refreshToken: ", err)
-		return newJwtTokens, err
-	}
-	defer response.Body.Close()
-
-	Debugln("response.status =", response.Status)
-	if response.StatusCode != 200 {
-		return newJwtTokens, errors.New("refresh token refused: Unauthorized")
-	}
-	var res map[string]interface{}
-	json.NewDecoder(response.Body).Decode(&res)
-	//Debugln("res =", res)
-	at, _ := res["access_token"]
-	newJwtTokens.AccessToken = at.(string)
-	rt, _ := res["refresh_token"]
-	newJwtTokens.RefreshToken = rt.(string)
-	tokenAsJSON, _ := json.Marshal(newJwtTokens)
-	//Debugln("debug: ", string(tokenAsJSON))
-	tokenAsJSONb64 := base64.StdEncoding.EncodeToString(tokenAsJSON)
-	setCookie(w, "jwt_token", tokenAsJSONb64)
-	return newJwtTokens, err
-}
-
-func getJwtTokensFromCookie(r *http.Request) (JwtTokens, error) {
-	var jwtTokens JwtTokens
-	jsonJwt, err := r.Cookie("jwt_token")
-	if err != nil {
-		return jwtTokens, err
-	}
-	jsonJwtByteArr, err := base64.StdEncoding.DecodeString(jsonJwt.Value)
-	if err != nil {
-		fmt.Println("fatal error decoding jwt base64: ", err)
-		return jwtTokens, err
-	}
-	err = json.Unmarshal(jsonJwtByteArr, &jwtTokens)
-	if err != nil {
-		fmt.Println("error loading json: ", err)
-		return jwtTokens, err
-	}
-	//Debugln("token: ", string(jsonJwtByteArr))
-	return jwtTokens, err
-}
-
-type test_struct struct {
-	Test string
-}
-
-/*
-func handleSetJwtCookie(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(r.Body)
-	var t test_struct
-	err := decoder.Decode(&t)
-	if err != nil {
-		panic(err)
-	}
-	log.Printf("json decoder: %s\n", t.Test)
-
-	r.ParseForm()
-	log.Println("r.PostForm", r.PostForm)
-	log.Println("r.Form", r.Form)
-	cookieName := "jwt_token"
-	cookieValue := r.PostFormValue(cookieName)
-	cookieValue = r.Form.Get(cookieName)
-	setCookie(w, cookieName, cookieValue)
-	Debugln(r.Body)
-	Debugf("Setcookie: jwt_token = %s\n", cookieValue)
-}
-*/
-
-func setCookie(w http.ResponseWriter, cookieName, cookieValue string) {
-	cookie := &http.Cookie{
-		Name:     cookieName,
-		Value:    cookieValue,
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-		Path:     "/",
-	}
-	http.SetCookie(w, cookie)
-}
-
-func getTokenInfosFromB64(jwtToken string) {
-
-}
-
 func handleLogout(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie("jwt_token")
 	var loginErrStr string
@@ -488,33 +318,4 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	loginErrStr = fmt.Sprintf("&message=%s", url.QueryEscape(loginErrStr))
 	login_path := fmt.Sprintf("/login?next=%s%s", "/", loginErrStr)
 	http.Redirect(w, r, login_path, http.StatusSeeOther)
-}
-
-type JwtTokens struct {
-	AccessToken  string `json:"access_token" extensions:"x-order=0"`
-	RefreshToken string `json:"refresh_token,omitempty" extensions:"x-order=1"`
-}
-
-type refreshTokenRequest struct {
-	RefreshToken string `json:"refresh_token" valid:"required"`
-}
-
-// Debugf is a wrapper function for fmt.Printf that adds the "Debug: " prefix
-func Debugf(format string, a ...any) (n int, err error) {
-	if DEBUG != true {
-		return
-	}
-	format = "Debug: " + format
-	return fmt.Printf(format, a...)
-}
-
-// Debugln is a wrapper function for fmt.Println that adds the "Debug: " prefix
-func Debugln(a ...interface{}) (n int, err error) {
-	if DEBUG != true {
-		return
-	}
-	if len(a) > 0 {
-		a[0] = "Debug: " + fmt.Sprint(a[0])
-	}
-	return fmt.Println(a...)
 }

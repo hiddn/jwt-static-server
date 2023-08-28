@@ -1,4 +1,4 @@
-module github.com/hiddn/unet_auth
+module github.com/hiddn/jwt-static-server
 
 go 1.21.0
 
