@@ -44,7 +44,6 @@ func Init(configFile string) {
 	sites = append(sites, &s)
 	s.Access.S = &s
 	s.Config = confighandler.ReadConf(configFile)
-	s.Access.DefaultPolicy = s.Config.Default_permission
 	getJSONfromFile(configFile, &s.Config)
 
 	s.Access.LoadUsersAndPages(s.Config.Pages_file, s.Config.Groups_file, s.Config.Users_file)
@@ -148,13 +147,13 @@ type User struct {
 }
 
 func (a *AccessData) LoadUsersAndPages(pages_file, groups_file, users_file string) {
-	//getJSONfromFile(users_file, &a.Users)
+	a.DefaultPolicy = a.S.Config.Default_permission
+	getJSONfromFile(users_file, &a.UserID)
 	getJSONfromFile(pages_file, &a.PageGroups)
 	getJSONfromFile(groups_file, &a.GroupUsers)
-	a.DefaultPolicy = a.getDefaultPolicy()
+
 	fmt.Println("Default policy:", a.DefaultPolicy)
 	a.buildAccessMapByUser()
-	//defPerm := a.PageGroups["default"]
 }
 
 func (a *AccessData) buildAccessMapByUser() {
@@ -189,26 +188,6 @@ func (a *AccessData) buildAccessMapByUser() {
 			a.userGroups[usergroup] = a.GetIDbyUsername(u)
 		}
 	}
-}
-
-func (a *AccessData) getDefaultPolicy() string {
-	defaultGroups, ok := a.PageGroups["default"]
-	if !ok {
-		log.Printf("Default permission missing.")
-		return "deny"
-	}
-	if len(defaultGroups) > 0 {
-		group := defaultGroups[0]
-		if _, ok := a.GroupUsers[group]; !ok {
-			if group != "deny" && group != "authed" && group != "open" {
-				return "deny"
-			}
-			log.Fatalf("AccessData: default page specifies group that does not exist. Accepted values: authed, deny, open, or <groupname>\n")
-			return group
-		}
-		return group
-	}
-	return "deny"
 }
 
 func (s *Site) handleLogout(w http.ResponseWriter, r *http.Request) {
