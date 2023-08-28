@@ -43,6 +43,9 @@ func (a *AccessData) canUserAccessPage(page string, user_id int, username string
 	*/
 	if _, dontUseDefault := a.PageGroups[page]; !dontUseDefault {
 		// Page is not listed in pages.json
+		if debug.IsEnabled() {
+			fmt.Printf(" (default policy)")
+		}
 		//debug.F("dontUseDefault=%v, a.DefaultPolicy=%s\na.IsUserMemberOfGroup(username, a.DefaultPolicy)=%v", dontUseDefault, a.DefaultPolicy, a.IsUserMemberOfGroup(username, a.DefaultPolicy))
 		switch a.DefaultPolicy {
 		case "open":
@@ -66,7 +69,9 @@ func (a *AccessData) canUserAccessPage(page string, user_id int, username string
 		return
 	}
 	expectedUserID, ok := pages[page]
-	ret = a.validateUserID(username, expectedUserID)
+	if ok {
+		ret = a.validateUserID(username, expectedUserID)
+	}
 	return
 }
 
