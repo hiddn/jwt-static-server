@@ -1,12 +1,10 @@
 package unet_auth
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -15,7 +13,7 @@ import (
 	"github.com/hiddn/jwt-static-server/jwtauth"
 )
 
-var sites []Site
+var sites []*Site
 
 //var Config confighandler.Configuration
 
@@ -37,16 +35,18 @@ type AccessData struct {
 	DefaultPolicy string
 }
 
+// Add a static site to serve
 func Init(configFile string) {
 	debug.Enable()
 	var err error
 
 	var s Site
+	sites = append(sites, &s)
 	s.Access.S = &s
 	s.Config = confighandler.ReadConf(configFile)
+	s.Access.DefaultPolicy = s.Config.Default_permission
 	getJSONfromFile(configFile, &s.Config)
 
-	//Access.LoadUsersAndPages("pages.json", "groups.json", "users.json")
 	s.Access.LoadUsersAndPages(s.Config.Pages_file, s.Config.Groups_file, s.Config.Users_file)
 
 	jwksURL := s.Config.Csc_api_url + s.Config.Csc_api_jwks_path
@@ -63,7 +63,7 @@ func Init(configFile string) {
 	}
 
 	http.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
-	http.HandleFunc("/logout", handleLogout)
+	http.HandleFunc("/logout", s.handleLogout)
 	//http.HandleFunc("/setcookie", handleSetJwtCookie)
 
 	log.Print("Listening on :3000...")
@@ -82,7 +82,7 @@ func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
 	}
 	var loginErrStr string = ""
 	fs = http.FileServer(http.Dir(s.Config.Static_content_dir))
-	jwtTokens, err := jwtauth.GetJwtTokensFromCookie(r)
+	jwtTokens, err := jwtauth.GetJwtTokensFromCookie(r, s.Config.Cookie_name)
 	if err != nil {
 		fmt.Println("error with getJwtTokenFromCookie(): ", err)
 	} else {
@@ -90,7 +90,7 @@ func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
 		var isValid bool
 		var claims jwt.MapClaims
 		refresURL := fmt.Sprintf("%s%s", s.Config.Csc_api_url, s.Config.Csc_api_refresh_path)
-		isValid, claims = s.Jwt.ValidateJWTTokens(w, jwtTokens, refresURL)
+		isValid, claims = s.Jwt.ValidateJWTTokens(w, jwtTokens, refresURL, s.Config.Cookie_name)
 		if s.Access.DefaultPolicy == "open" {
 			fmt.Printf("(policy: open): serving %s without authentification\n", r.URL.Path)
 			servePage()
@@ -136,8 +136,9 @@ type Group struct {
 }
 
 type PageAccess struct {
-	// Accepted values: group_name|authed|unrestricted
-	Page   string   `json:"page"` // use default if nothing else is found
+	// key: 'default' allows to set the default policy for the site
+	// Accepted values: authed, deny, open, or <groupname>
+	Page   string   `json:"page"`
 	Groups []string `json:"groups"`
 }
 
@@ -190,85 +191,6 @@ func (a *AccessData) buildAccessMapByUser() {
 	}
 }
 
-func (a *AccessData) IsUserMemberOfGroup(username, group string) bool {
-	usergroup := fmt.Sprintf("%s.%s", group, username)
-	if expectedUserID, ok := a.userGroups[usergroup]; ok {
-		return a.validateUserID(username, expectedUserID)
-	}
-	return false
-}
-func (a *AccessData) GetIDbyUsername(username string) int {
-	id, ok := a.UserID[username]
-	if !ok {
-		// UserID not found
-		return -1
-	}
-	return id
-}
-
-func (a *AccessData) canUserAccessPage(page string, user_id int, username string) (ret bool) {
-	ret = false
-	printRet := func(ret *bool) {
-		if debug.IsEnabled() {
-			fmt.Printf(" Granted: %v\n", *ret)
-		}
-	}
-	defer printRet(&ret)
-	debug.F("Validating access. u:%s p:%s...", username, page)
-	/*
-		// that code could eventually be used if I added the possibility
-		// to give permissions for all files (and sub-directories) in a directory.
-		for {
-			parts := strings.Split(page, "/")
-			tPage := strings.Join(parts[:len(parts)-1], "/")
-			debug.F("Testing %s\n", tPage)
-			break
-		}
-	*/
-	if _, dontUseDefault := a.PageGroups[page]; !dontUseDefault {
-		// Page is not listed in pages.json
-		//debug.F("dontUseDefault=%v, a.DefaultPolicy=%s\na.IsUserMemberOfGroup(username, a.DefaultPolicy)=%v", dontUseDefault, a.DefaultPolicy, a.IsUserMemberOfGroup(username, a.DefaultPolicy))
-		switch a.DefaultPolicy {
-		case "open":
-			ret = true
-			return
-		case "authed":
-			ret = true
-			return
-		case "deny":
-			ret = false
-			return
-		default:
-			ret = a.IsUserMemberOfGroup(username, a.DefaultPolicy)
-			return
-		}
-	}
-	//debug.F("Validation for page/user access: u:%s p:%s\n", page, username)
-	pages, ok := a.UserPages[username]
-	if !ok {
-		ret = false
-		return
-	}
-	expectedUserID, ok := pages[page]
-	ret = a.validateUserID(username, expectedUserID)
-	return
-}
-
-func (a *AccessData) validateUserID(username string, user_id int) bool {
-	expectedUserID, ok := a.UserID[username]
-	if !ok {
-		if !a.S.Config.Force_UserID_validation {
-			return true
-		}
-		return false
-	}
-	if expectedUserID == user_id || expectedUserID == -1 {
-		return true
-	}
-	return false
-
-}
-
 func (a *AccessData) getDefaultPolicy() string {
 	defaultGroups, ok := a.PageGroups["default"]
 	if !ok {
@@ -289,24 +211,8 @@ func (a *AccessData) getDefaultPolicy() string {
 	return "deny"
 }
 
-func getJSONfromFile(file string, ptr interface{}) {
-	content, err := os.ReadFile(file)
-	if err != nil {
-		log.Fatal("Error when opening file: ", err)
-	}
-	if err := json.Unmarshal(content, &ptr); err != nil {
-		log.Fatalf("getJSONfromFile() error with %s: %s", file, err)
-	}
-}
-
-func validateUserAccess(page string, user_id int, username string) bool {
-	if username == "Admin" {
-		return true
-	}
-	return false
-}
-func handleLogout(w http.ResponseWriter, r *http.Request) {
-	c, err := r.Cookie("jwt_token")
+func (s *Site) handleLogout(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie(s.Config.Cookie_name)
 	var loginErrStr string
 	if err == nil {
 		c.Expires = time.Unix(1414414788, 1414414788000)

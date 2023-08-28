@@ -20,6 +20,7 @@ type JwtInfos struct {
 	Jwks          *keyfunc.JWKS
 	JwksURL       string
 	ApiRefreshURL string
+	CancelFunc    context.CancelFunc
 }
 
 type JwtTokens struct {
@@ -33,10 +34,11 @@ type refreshTokenRequest struct {
 
 func InitJWKS(jwksURL string, ApiRefreshURL string) (JwtInfos, error) {
 	var Jwt JwtInfos
+	var ctx context.Context
 	var err error
 
 	// Create a context that, when cancelled, ends the JWKS background refresh goroutine.
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, Jwt.CancelFunc = context.WithCancel(context.Background())
 
 	// Create the keyfunc options. Use an error handler that logs. Refresh the JWKS when a JWT signed by an unknown KID
 	// is found or at the specified interval. Rate limit these refreshes. Timeout the initial JWKS refresh request after
@@ -82,7 +84,7 @@ func (Jwt JwtInfos) validateToken(jwtToken string) (bool, jwt.MapClaims) {
 	//debug.LN("username =", claims["username"])
 	return true, claims
 }
-func (Jwt JwtInfos) ValidateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens, jwtRefreshURL string) (isValid bool, claims jwt.MapClaims) {
+func (Jwt JwtInfos) ValidateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens, jwtRefreshURL, cookieName string) (isValid bool, claims jwt.MapClaims) {
 	//var isValid bool
 	//var claims jwt.MapClaims
 	isValid, claims = Jwt.validateToken(jwtTokens.AccessToken)
@@ -94,7 +96,7 @@ func (Jwt JwtInfos) ValidateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens
 		// Refresh token still valid.
 		// We need to get a new access token with the refresh token.
 		//jwtRefreshURL := Config.Csc_api_url + Config.Csc_api_refresh_path
-		newJwtTokens, err := refreshToken(w, jwtRefreshURL, jwtTokens.RefreshToken)
+		newJwtTokens, err := refreshToken(w, jwtRefreshURL, jwtTokens.RefreshToken, cookieName)
 		if err != nil {
 			isValid = false
 			return isValid, claims
@@ -104,7 +106,7 @@ func (Jwt JwtInfos) ValidateJWTTokens(w http.ResponseWriter, jwtTokens JwtTokens
 	return isValid, claims
 }
 
-func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTokens, error) {
+func refreshToken(w http.ResponseWriter, url, refreshToken, cookieName string) (JwtTokens, error) {
 	debug.LN("refreshToken() called.")
 	var newJwtTokens JwtTokens
 	var rtReq refreshTokenRequest
@@ -137,13 +139,13 @@ func refreshToken(w http.ResponseWriter, url string, refreshToken string) (JwtTo
 	tokenAsJSON, _ := json.Marshal(newJwtTokens)
 	//debug.LN("debug: ", string(tokenAsJSON))
 	tokenAsJSONb64 := base64.StdEncoding.EncodeToString(tokenAsJSON)
-	setCookie(w, "jwt_token", tokenAsJSONb64)
+	setCookie(w, cookieName, tokenAsJSONb64)
 	return newJwtTokens, err
 }
 
-func GetJwtTokensFromCookie(r *http.Request) (JwtTokens, error) {
+func GetJwtTokensFromCookie(r *http.Request, cookieName string) (JwtTokens, error) {
 	var jwtTokens JwtTokens
-	jsonJwt, err := r.Cookie("jwt_token")
+	jsonJwt, err := r.Cookie(cookieName)
 	if err != nil {
 		return jwtTokens, err
 	}
