@@ -19,4 +19,5 @@ type Configuration struct {
 	Groups_file               string
 	Users_file                string
 	Force_UserID_validation   bool
+	Cors_allowed_origins      []string
 }

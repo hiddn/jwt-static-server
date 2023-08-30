@@ -102,6 +102,7 @@ func (Jwt JwtInfos) ValidateAccessToken(w http.ResponseWriter, r *http.Request, 
 	}
 	rt_s, err := GetRefreshTokenFromCookie(r, "jwt_token")
 	if err != nil {
+		debug.LN("GetRefreshTokenFromCookie() failed.")
 		isValid = false
 		return isValid, claims
 	}

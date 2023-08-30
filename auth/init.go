@@ -9,6 +9,7 @@ import (
 	"github.com/hiddn/jwt-static-server/confighandler"
 	"github.com/hiddn/jwt-static-server/debug"
 	"github.com/hiddn/jwt-static-server/jwtauth"
+	"github.com/rs/cors"
 )
 
 var sites []*Site
@@ -63,12 +64,31 @@ func Init(configFile string) {
 		http.Handle(s.Config.Login_url, http.StripPrefix(s.Config.Login_url, fs))
 	}
 
-	http.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
-	http.HandleFunc("/logout", s.handleLogout)
-	http.HandleFunc("/setjwttokens", s.handleSetJwtCookie)
+	mux := http.NewServeMux()
+	mux.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
+	mux.HandleFunc("/logout", s.handleLogout)
+	mux.HandleFunc("/setjwttokens", s.handleSetJwtCookie)
+	/*
+		http.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
+		http.HandleFunc("/logout", s.handleLogout)
+		http.HandleFunc("/setjwttokens", s.handleSetJwtCookie)
+	*/
 
+	c := cors.New(cors.Options{
+		AllowedOrigins: s.Config.Cors_allowed_origins,
+	})
+
+	/*
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			//w.Header().Set("Content-Type", "application/json")
+			//w.Write([]byte("{\"hello\": \"world\"}"))
+		})
+	*/
+
+	handler := c.Handler(mux)
+	//handler := cors.Default().Handler(mux)
 	log.Print("Listening on :3000...")
-	err = http.ListenAndServe(":3000", nil)
+	err = http.ListenAndServe(":3000", handler)
 	if err != nil {
 		log.Fatal(err)
 	}

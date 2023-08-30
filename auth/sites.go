@@ -29,7 +29,7 @@ func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
 	accessToken := s.GetSessionValue(w, r, "access_token")
 	if accessToken != "" {
 		//debug.LN("access token: ", jwtTokens.AccessToken)
-		var isValid bool
+		var isValid bool = false
 		var claims jwt.MapClaims
 		refreshURL := fmt.Sprintf("%s%s", s.Config.Csc_api_url, s.Config.Csc_api_refresh_path)
 		isValid, claims = s.Jwt.ValidateAccessToken(w, r, accessToken, refreshURL, s.Config.Jwt_cookie_name, s.HandleRefreshCB)
@@ -66,7 +66,7 @@ func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
 	if loginErrStr != "" {
 		loginErrStr = fmt.Sprintf("&message=%s", url.QueryEscape(loginErrStr))
 	}
-	login_path := fmt.Sprintf("/login?next=%s%s", r.URL.Path, loginErrStr)
+	login_path := fmt.Sprintf("%s?next=%s%s", s.Config.Login_url, r.URL.Path, loginErrStr)
 	http.Redirect(w, r, login_path, http.StatusSeeOther)
 	return
 }
@@ -82,7 +82,7 @@ func (s *Site) handleLogout(w http.ResponseWriter, r *http.Request) {
 		loginErrStr = "You were already logged out"
 	}
 	loginErrStr = fmt.Sprintf("&message=%s", url.QueryEscape(loginErrStr))
-	login_path := fmt.Sprintf("/login?next=%s%s", "/", loginErrStr)
+	login_path := fmt.Sprintf("%s?next=%s%s", "/", s.Config.Login_url, loginErrStr)
 	http.Redirect(w, r, login_path, http.StatusSeeOther)
 }
 

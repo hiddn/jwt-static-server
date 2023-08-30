@@ -6,6 +6,7 @@ require (
 	github.com/MicahParks/keyfunc/v2 v2.1.0
 	github.com/golang-jwt/jwt/v5 v5.0.0
 	github.com/gorilla/sessions v1.2.1
+	github.com/rs/cors v1.9.0
 )
 
 require github.com/gorilla/securecookie v1.1.1 // indirect
