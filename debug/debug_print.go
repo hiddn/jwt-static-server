@@ -26,7 +26,7 @@ func F(format string, a ...any) (n int, err error) {
 }
 
 // Debugln is a wrapper function for fmt.Println that adds the "Debug: " prefix
-func LN(a ...interface{}) (n int, err error) {
+func LN(a ...any) (n int, err error) {
 	if DEBUG != true {
 		return
 	}

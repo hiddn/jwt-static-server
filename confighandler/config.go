@@ -2,6 +2,8 @@ package confighandler
 
 type Configuration struct {
 	Enable_debug              bool
+	Session_key               string
+	Session_name              string
 	Static_content_urlpath    string
 	Static_content_dir        string
 	Default_permission        string
@@ -9,7 +11,7 @@ type Configuration struct {
 	Csc_api_login_path        string
 	Csc_api_refresh_path      string
 	Csc_api_jwks_path         string
-	Cookie_name               string
+	Jwt_cookie_name           string
 	Login_url                 string
 	Login_content_serve_local bool
 	Login_content_dir         string

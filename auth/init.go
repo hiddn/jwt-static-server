@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/gorilla/sessions"
 	"github.com/hiddn/jwt-static-server/confighandler"
 	"github.com/hiddn/jwt-static-server/debug"
 	"github.com/hiddn/jwt-static-server/jwtauth"
@@ -18,6 +19,7 @@ type Site struct {
 	Config confighandler.Configuration
 	Access AccessData
 	Jwt    jwtauth.JwtInfos
+	Store  *sessions.CookieStore
 }
 
 type AccessData struct {
@@ -46,6 +48,7 @@ func Init(configFile string) {
 	getJSONfromFile(configFile, &s.Config)
 
 	s.Access.LoadUsersAndPages(s.Config.Pages_file, s.Config.Groups_file, s.Config.Users_file)
+	s.Store = sessions.NewCookieStore([]byte(s.Config.Session_key))
 
 	jwksURL := s.Config.Csc_api_url + s.Config.Csc_api_jwks_path
 	jwksRefreshURL := s.Config.Csc_api_url + s.Config.Csc_api_refresh_path
@@ -62,7 +65,7 @@ func Init(configFile string) {
 
 	http.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
 	http.HandleFunc("/logout", s.handleLogout)
-	//http.HandleFunc("/setcookie", handleSetJwtCookie)
+	http.HandleFunc("/setjwttokens", s.handleSetJwtCookie)
 
 	log.Print("Listening on :3000...")
 	err = http.ListenAndServe(":3000", nil)
@@ -96,7 +99,7 @@ func (a *AccessData) buildAccessMapByUser() {
 				} else {
 					a.UserPages[u][p] = a.GetIDbyUsername(u)
 				}
-				debug.F("access: u:%s p:%s g:%s\n", u, p, g)
+				debug.F("access: p:%s\tu:%s\tg:%s\n", p, u, g)
 			}
 		}
 	}
