@@ -26,6 +26,11 @@ func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
 	}
 	var loginErrStr string = ""
 	fs = http.FileServer(http.Dir(s.Config.Static_content_dir))
+	if s.Access.DefaultPolicy == "open" {
+		fmt.Printf("(policy: open): serving %s without authentification\n", r.URL.Path)
+		servePage()
+		return
+	}
 	accessToken := s.GetSessionValue(w, r, "access_token")
 	if accessToken != "" {
 		//debug.LN("access token: ", jwtTokens.AccessToken)
@@ -33,11 +38,6 @@ func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
 		var claims jwt.MapClaims
 		refreshURL := fmt.Sprintf("%s%s", s.Config.Csc_api_url, s.Config.Csc_api_refresh_path)
 		isValid, claims = s.Jwt.ValidateAccessToken(w, r, accessToken, refreshURL, s.Config.Jwt_cookie_name, s.HandleRefreshCB)
-		if s.Access.DefaultPolicy == "open" {
-			fmt.Printf("(policy: open): serving %s without authentification\n", r.URL.Path)
-			servePage()
-			return
-		}
 		if isValid {
 			var username string
 			var userIDf float64
@@ -66,9 +66,22 @@ func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
 	if loginErrStr != "" {
 		loginErrStr = fmt.Sprintf("&message=%s", url.QueryEscape(loginErrStr))
 	}
-	login_path := fmt.Sprintf("%s?next=%s%s", s.Config.Login_url, r.URL.Path, loginErrStr)
-	http.Redirect(w, r, login_path, http.StatusSeeOther)
+	s.RedirectToLoginPage(w, r, loginErrStr)
 	return
+}
+
+func (s *Site) RedirectToLoginPage(w http.ResponseWriter, r *http.Request, loginErrStr string) {
+	var fullURL string
+	var path string
+	if r.URL.String() == "/logout" {
+		path = s.Config.Static_content_urlpath
+	} else {
+		path = r.URL.String()
+	}
+	fullURL = s.Config.Site_url + path
+	debug.F("fullURL = %s\n", fullURL)
+	login_path := fmt.Sprintf("%s?next=%s%s", s.Config.Login_url, url.QueryEscape(fullURL), loginErrStr)
+	http.Redirect(w, r, login_path, http.StatusSeeOther)
 }
 
 func (s *Site) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -81,12 +94,13 @@ func (s *Site) handleLogout(w http.ResponseWriter, r *http.Request) {
 	} else {
 		loginErrStr = "You were already logged out"
 	}
-	loginErrStr = fmt.Sprintf("&message=%s", url.QueryEscape(loginErrStr))
-	login_path := fmt.Sprintf("%s?next=%s%s", "/", s.Config.Login_url, loginErrStr)
-	http.Redirect(w, r, login_path, http.StatusSeeOther)
+	if loginErrStr != "" {
+		loginErrStr = fmt.Sprintf("&message=%s", url.QueryEscape(loginErrStr))
+	}
+	s.RedirectToLoginPage(w, r, loginErrStr)
 }
 
-func (s *Site) handleSetJwtCookie(w http.ResponseWriter, r *http.Request) {
+func (s *Site) handleSetJwtTokens(w http.ResponseWriter, r *http.Request) {
 	// Now receiving as form data instead of json anymore, to avoid preflight.
 	// For CORS, it will be considered a safe request if:
 	//		1. Safe method is used: GET, POST or HEAD (nothing else)
@@ -98,7 +112,7 @@ func (s *Site) handleSetJwtCookie(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	accessToken := r.FormValue("access_token")
 	refreshToken := r.FormValue("refresh_token")
-	debug.F("handleSetJwtCookie():\n\tat: %v\n\trt: %v\n", accessToken, refreshToken)
+	//debug.F("handleSetJwtCookie():\n\tat: %v\n\trt: %v\n", accessToken, refreshToken)
 	if accessToken == "" || refreshToken == "" {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return

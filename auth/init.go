@@ -47,6 +47,8 @@ func Init(configFile string) {
 		debug.Enable()
 	}
 	getJSONfromFile(configFile, &s.Config)
+	debug.F("s.Config.Login_url = %v\n", s.Config.Login_url)
+	//debug.F("%s?next=%s%s", s.Config.Login_url, url.QueryEscape(r.URL.String()), loginErrStr)
 
 	s.Access.LoadUsersAndPages(s.Config.Pages_file, s.Config.Groups_file, s.Config.Users_file)
 	s.Store = sessions.NewCookieStore([]byte(s.Config.Session_key))
@@ -67,7 +69,7 @@ func Init(configFile string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
 	mux.HandleFunc("/logout", s.handleLogout)
-	mux.HandleFunc("/setjwttokens", s.handleSetJwtCookie)
+	mux.HandleFunc("/setjwttokens", s.handleSetJwtTokens)
 	/*
 		http.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
 		http.HandleFunc("/logout", s.handleLogout)

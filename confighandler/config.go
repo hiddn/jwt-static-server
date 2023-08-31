@@ -2,6 +2,7 @@ package confighandler
 
 type Configuration struct {
 	Enable_debug              bool
+	Site_url                  string
 	Session_key               string
 	Session_name              string
 	Static_content_urlpath    string

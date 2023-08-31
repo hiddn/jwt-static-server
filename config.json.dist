@@ -1,5 +1,6 @@
 {
     "enable_debug": true,
+    "site_url": "http://localhost",
     "session_key": "something random (CHANGE ME!!!!!)",
     "session_name": "site1",
     "static_content_urlpath": "/",
