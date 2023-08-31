@@ -4,3 +4,5 @@ site
 src
 todo.md
 tmp*
+session-key-generator
+jwt-static-server
