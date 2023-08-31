@@ -9,13 +9,13 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/hiddn/jwt-static-server/debug"
-	"github.com/hiddn/jwt-static-server/jwtauth"
+	"github.com/hiddn/jwt-static-server/jwtlib"
 )
 
-func (s *Site) HandleRefreshCB(w http.ResponseWriter, r *http.Request, jwtTokens jwtauth.JwtTokens) {
+func (s *Site) HandleRefreshCB(w http.ResponseWriter, r *http.Request, jwtTokens jwtlib.JwtTokens) {
 	s.SetSessionValue(w, r, "access_token", jwtTokens.AccessToken)
 	cookieName := s.Config.Jwt_cookie_name
-	jwtauth.SetJwtCookie(w, cookieName, jwtTokens.RefreshToken)
+	jwtlib.SetJwtCookie(w, cookieName, jwtTokens.RefreshToken)
 }
 
 func (s Site) serveStatic(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +118,7 @@ func (s *Site) handleSetJwtTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cookieName := s.Config.Jwt_cookie_name
-	jwtauth.SetJwtCookie(w, cookieName, refreshToken)
+	jwtlib.SetJwtCookie(w, cookieName, refreshToken)
 	s.SetSessionValue(w, r, "access_token", accessToken)
 }
 

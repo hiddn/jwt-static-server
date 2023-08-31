@@ -8,7 +8,7 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/hiddn/jwt-static-server/confighandler"
 	"github.com/hiddn/jwt-static-server/debug"
-	"github.com/hiddn/jwt-static-server/jwtauth"
+	"github.com/hiddn/jwt-static-server/jwtlib"
 	"github.com/rs/cors"
 )
 
@@ -19,7 +19,7 @@ var sites []*Site
 type Site struct {
 	Config confighandler.Configuration
 	Access AccessData
-	Jwt    jwtauth.JwtInfos
+	Jwt    jwtlib.JwtInfos
 	Store  *sessions.CookieStore
 }
 
@@ -55,7 +55,7 @@ func Init(configFile string) {
 
 	jwksURL := s.Config.Csc_api_url + s.Config.Csc_api_jwks_path
 	jwksRefreshURL := s.Config.Csc_api_url + s.Config.Csc_api_refresh_path
-	s.Jwt, err = jwtauth.InitJWKS(jwksURL, jwksRefreshURL)
+	s.Jwt, err = jwtlib.InitJWKS(jwksURL, jwksRefreshURL)
 	if err != nil {
 		log.Fatalf("Could not obtain JWKS from %s", jwksURL)
 	}
