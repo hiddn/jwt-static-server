@@ -63,7 +63,7 @@ func Init(configFile string) {
 	//vue page - if served locally
 	if s.Config.Login_content_serve_local {
 		fs := http.FileServer(http.Dir(s.Config.Login_content_dir))
-		http.Handle(s.Config.Login_url, http.StripPrefix(s.Config.Login_url, fs))
+		http.Handle("/login/", http.StripPrefix("/login/", fs))
 	}
 
 	mux := http.NewServeMux()
