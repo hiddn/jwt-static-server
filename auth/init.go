@@ -80,7 +80,8 @@ func Init(configFile string) {
 	c := cors.New(cors.Options{
 		AllowedOrigins:   s.Config.Cors_allowed_origins,
 		AllowCredentials: true,
-	})
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type"}})
 
 	/*
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
