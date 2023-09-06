@@ -60,13 +60,14 @@ func Init(configFile string) {
 		log.Fatalf("Could not obtain JWKS from %s", jwksURL)
 	}
 
+	mux := http.NewServeMux()
+
 	//vue page - if served locally
 	if s.Config.Login_content_serve_local {
 		fs := http.FileServer(http.Dir(s.Config.Login_content_dir))
-		http.Handle("/login/", http.StripPrefix("/login/", fs))
+		mux.Handle("/login/", http.StripPrefix("/login/", fs))
 	}
 
-	mux := http.NewServeMux()
 	mux.HandleFunc(s.Config.Static_content_urlpath, s.serveStatic)
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/setjwttokens", s.handleSetJwtTokens)
