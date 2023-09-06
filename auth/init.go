@@ -78,7 +78,8 @@ func Init(configFile string) {
 	*/
 
 	c := cors.New(cors.Options{
-		AllowedOrigins: s.Config.Cors_allowed_origins,
+		AllowedOrigins:   s.Config.Cors_allowed_origins,
+		AllowCredentials: true,
 	})
 
 	/*
