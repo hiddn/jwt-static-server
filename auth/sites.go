@@ -97,6 +97,7 @@ func (s *Site) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if loginErrStr != "" {
 		loginErrStr = fmt.Sprintf("&message=%s", url.QueryEscape(loginErrStr))
 	}
+	s.EndSession(w, r)
 	s.RedirectToLoginPage(w, r, loginErrStr)
 }
 
@@ -127,6 +128,18 @@ func (s *Site) SetSessionValue(w http.ResponseWriter, r *http.Request, key, acce
 	// existing session: Get() always returns a session, even if empty.
 	session, _ := s.Store.Get(r, s.Config.Session_name)
 	session.Values[key] = accessToken
+	err := session.Save(r, w)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Site) EndSession(w http.ResponseWriter, r *http.Request) {
+	// Get a session. We're ignoring the error resulted from decoding an
+	// existing session: Get() always returns a session, even if empty.
+	session, _ := s.Store.Get(r, s.Config.Session_name)
+	session.Options.MaxAge = -1
 	err := session.Save(r, w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
